@@ -11,9 +11,11 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 
+	"mtx/internal/analyze"
 	"mtx/internal/config"
 	"mtx/internal/daemon"
 	"mtx/internal/encode"
@@ -28,6 +30,7 @@ const usage = `mtx — media transcode helper
 
 Usage:
   mtx probe <file>                     show what would happen to a file, without touching it
+  mtx analyze [path...]                codec/resolution/HDR/decision breakdown of a library
   mtx enqueue [flags] <path...>        queue files or directories for the daemon
   mtx enqueue --now [flags] <path...>  transcode them right here, synchronously
   mtx serve [--config <file>]          run the daemon: workers + periodic library scan
@@ -38,6 +41,10 @@ Flags for enqueue:
   --grain              opt this content into AV1 film-grain synthesis (SDR only)
   --quarantine <dir>   override where originals go (with --now)
   --config <file>      config file (default /etc/mtx/config.toml if it exists)
+
+Flags for analyze:
+  --config <file>      config file (default /etc/mtx/config.toml if it exists)
+                        paths default to the config's library_roots when omitted
 `
 
 func main() {
@@ -49,6 +56,8 @@ func main() {
 	switch os.Args[1] {
 	case "probe":
 		err = probeCommand(os.Args[2:])
+	case "analyze":
+		err = analyzeCommand(os.Args[2:])
 	case "enqueue":
 		err = enqueueCommand(os.Args[2:])
 	case "serve":
@@ -106,6 +115,62 @@ func probeCommand(args []string) error {
 	}
 	fmt.Printf("ffmpeg:   ffmpeg %s\n", strings.Join(ffmpegArgs, " "))
 	return nil
+}
+
+func analyzeCommand(args []string) error {
+	flags := flag.NewFlagSet("analyze", flag.ExitOnError)
+	configPath := flags.String("config", "", "config file")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+
+	roots := flags.Args()
+	if len(roots) == 0 {
+		cfg, err := loadConfig(*configPath)
+		if err != nil {
+			return err
+		}
+		if len(cfg.LibraryRoots) == 0 {
+			return fmt.Errorf("usage: mtx analyze [path...] (or set library_roots in config)")
+		}
+		roots = cfg.LibraryRoots
+	}
+
+	report, err := analyze.Walk(roots)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "mtx: scan warnings:", err)
+	}
+	printAnalysis(report)
+	return nil
+}
+
+func printAnalysis(r analyze.Report) {
+	fmt.Printf("%d files, %.1f GB\n\n", r.Files, float64(r.Bytes)/1e9)
+	printBuckets("codec", r.ByCodec)
+	printBuckets("resolution", r.ByResolution)
+	printBuckets("dynamic range", r.ByDynamicRange)
+	printBuckets("decision", r.ByDecision)
+	if len(r.Errors) > 0 {
+		fmt.Printf("%d file(s) could not be probed:\n", len(r.Errors))
+		for _, e := range r.Errors {
+			fmt.Printf("  %v\n", e)
+		}
+	}
+}
+
+func printBuckets(label string, buckets map[string]analyze.Bucket) {
+	keys := make([]string, 0, len(buckets))
+	for k := range buckets {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return buckets[keys[i]].Bytes > buckets[keys[j]].Bytes })
+
+	fmt.Printf("%s:\n", label)
+	for _, k := range keys {
+		b := buckets[k]
+		fmt.Printf("  %-24s %5d files  %8.1f GB\n", k, b.Files, float64(b.Bytes)/1e9)
+	}
+	fmt.Println()
 }
 
 func enqueueCommand(args []string) error {
