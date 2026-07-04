@@ -1,0 +1,21 @@
+# mtx daemon — install to /etc/systemd/system/mtx.service
+#
+# The service user needs:
+#   - membership in the `render` group (Quick Sync via /dev/dri/renderD128)
+#   - read/write access to the media library and quarantine directories,
+#     with the same group your *arr/Jellyfin stack uses so replaced files
+#     stay readable by them
+[Unit]
+Description=mtx media transcode daemon
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/mtx serve --config /etc/mtx/config.toml
+Restart=on-failure
+User=mtx
+SupplementaryGroups=render
+# Encoding is nice'd down so playback and other services keep priority.
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

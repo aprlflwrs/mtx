@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	"mtx/internal/probe"
 	"mtx/internal/queue"
 	"mtx/internal/scan"
+	"mtx/internal/server"
 )
 
 const usage = `mtx — media transcode helper
@@ -181,9 +183,22 @@ func serveCommand(args []string) error {
 	defer store.Close()
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	log.Info("mtx daemon starting", "workers", cfg.Workers, "roots", cfg.LibraryRoots)
+	log.Info("mtx daemon starting", "workers", cfg.Workers, "roots", cfg.LibraryRoots, "listen", cfg.Listen)
+
+	web := &http.Server{
+		Addr:    cfg.Listen,
+		Handler: (&server.Server{Config: cfg, Store: store, Log: log}).Handler(),
+	}
+	go func() {
+		if err := web.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Error("http server", "error", err)
+		}
+	}()
+
 	d := &daemon.Daemon{Config: cfg, Store: store, Log: log}
 	d.Run(interruptibleContext())
+
+	web.Shutdown(context.Background())
 	log.Info("mtx daemon stopped")
 	return nil
 }

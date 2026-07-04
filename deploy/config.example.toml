@@ -1,0 +1,39 @@
+# mtx configuration — install to /etc/mtx/config.toml
+# Every key is optional; omitted keys use built-in defaults.
+
+db_path = "/var/lib/mtx/mtx.db"
+
+# Originals are moved here after a verified re-encode — never deleted.
+# Prune manually once you trust the results.
+quarantine_root = "/mnt/media/quarantine"
+
+# The periodic scan sweeps these for video files not yet considered.
+library_roots = ["/mnt/media/tv", "/mnt/media/movies"]
+scan_interval = "24h"
+
+# Concurrent encodes. Quick Sync saturates around 2; 1 keeps the box quiet.
+workers = 1
+
+# Webhook + status endpoint. Must be reachable from the *arr containers —
+# with docker bridge networking that means a non-loopback address.
+listen = "127.0.0.1:8787"
+webhook_token = "change-me"
+
+# How the dockerized *arr stack's paths translate to this host.
+# First match wins.
+[[path_mappings]]
+from = "/data/tv"
+to = "/mnt/media/tv"
+
+[[path_mappings]]
+from = "/data/movies"
+to = "/mnt/media/movies"
+
+# Encoder quality knobs. Validate on a real episode before a bulk run
+# (lower = higher quality and bigger files).
+[quality]
+hd_global_quality = 22    # hevc_qsv ICQ, 1080p-and-below tier
+uhd_hdr_crf = 18          # x265, 4K HDR
+uhd_sdr_crf = 19          # x265, 4K SDR
+av1_crf = 30              # SVT-AV1, opt-in film-grain path
+av1_film_grain_level = 8  # grain synthesis strength (0-50)
