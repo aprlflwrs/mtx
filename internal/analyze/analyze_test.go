@@ -29,14 +29,16 @@ func TestReportAdd(t *testing.T) {
 		t.Errorf("Bytes = %d, want 1070", report.Bytes)
 	}
 
-	wantCodec := map[string]Bucket{
-		"h264":       {Files: 4, Bytes: 1000},
-		"hevc":       {Files: 1, Bytes: 50},
-		"mpeg2video": {Files: 1, Bytes: 20},
+	wantResolutionCodec := map[string]map[string]Bucket{
+		"1080p":  {"h264": {Files: 2, Bytes: 300}, "hevc": {Files: 1, Bytes: 50}},
+		"4K/UHD": {"h264": {Files: 2, Bytes: 700}},
+		"SD":     {"mpeg2video": {Files: 1, Bytes: 20}},
 	}
-	for codec, want := range wantCodec {
-		if got := report.ByCodec[codec]; got != want {
-			t.Errorf("ByCodec[%s] = %+v, want %+v", codec, got, want)
+	for tier, codecs := range wantResolutionCodec {
+		for codec, want := range codecs {
+			if got := report.ByResolutionCodec[tier][codec]; got != want {
+				t.Errorf("ByResolutionCodec[%s][%s] = %+v, want %+v", tier, codec, got, want)
+			}
 		}
 	}
 
