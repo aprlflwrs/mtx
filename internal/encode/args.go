@@ -63,11 +63,16 @@ func videoArgs(m probe.MediaInfo, profile policy.Profile, q config.Quality) ([]s
 	case policy.AV1FilmGrain:
 		// film-grain-denoise defaults to on, which discards fine detail its
 		// denoiser mistakes for grain; grain synthesis works fine without it.
+		// preset 4 (not the slower 2): grain-retention guidance favors 2, but
+		// it's nearly 3x the cost of 4 with CPU-only encode on this hardware,
+		// and this profile is already opt-in/per-file rather than bulk.
+		// tune=0 (VQ) is mainline SVT-AV1's perceptual mode, matching intent
+		// to preserve how grain looks rather than optimize PSNR.
 		return []string{
 			"-c:v", "libsvtav1",
-			"-preset", "6",
+			"-preset", "4",
 			"-crf", strconv.Itoa(q.AV1CRF),
-			"-svtav1-params", fmt.Sprintf("film-grain=%d:film-grain-denoise=0", q.AV1FilmGrainLevel),
+			"-svtav1-params", fmt.Sprintf("film-grain=%d:film-grain-denoise=0:tune=0", q.AV1FilmGrainLevel),
 		}, nil
 	}
 	return nil, fmt.Errorf("no ffmpeg arguments defined for profile %q", profile)

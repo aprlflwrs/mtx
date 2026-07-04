@@ -32,7 +32,7 @@ type PathMapping struct {
 
 type Quality struct {
 	HDGlobalQuality   int `toml:"hd_global_quality"`    // hevc_qsv ICQ quality (lower = better, bigger)
-	UHDHDRCRF         int `toml:"uhd_hdr_crf"`          // x265 CRF for HDR 4K — conservative: artifacts show easily in HDR
+	UHDHDRCRF         int `toml:"uhd_hdr_crf"`          // x265 CRF for HDR 4K — lower than UHDSDRCRF: x265's RDO sees flat PQ samples and under-allocates bits otherwise
 	UHDSDRCRF         int `toml:"uhd_sdr_crf"`          // x265 CRF for SDR 4K
 	AV1CRF            int `toml:"av1_crf"`              // SVT-AV1 CRF for the grain-synthesis path
 	AV1FilmGrainLevel int `toml:"av1_film_grain_level"` // SVT-AV1 film-grain strength (0-50)
@@ -48,7 +48,7 @@ func Defaults() Config {
 		Listen:         "127.0.0.1:8787",
 		Quality: Quality{
 			HDGlobalQuality:   22,
-			UHDHDRCRF:         18,
+			UHDHDRCRF:         15,
 			UHDSDRCRF:         19,
 			AV1CRF:            30,
 			AV1FilmGrainLevel: 8,
