@@ -146,8 +146,7 @@ func analyzeCommand(args []string) error {
 
 func printAnalysis(r analyze.Report) {
 	fmt.Printf("%d files, %.1f GB\n\n", r.Files, float64(r.Bytes)/1e9)
-	printBuckets("codec", r.ByCodec)
-	printBuckets("resolution", r.ByResolution)
+	printResolutionBreakdown(r)
 	printBuckets("dynamic range", r.ByDynamicRange)
 	printBuckets("decision", r.ByDecision)
 	if len(r.Errors) > 0 {
@@ -158,19 +157,41 @@ func printAnalysis(r analyze.Report) {
 	}
 }
 
+// printResolutionBreakdown shows the codec mix within each resolution tier,
+// since "1080p" or "4K/UHD" alone hides whether it's already-efficient HEVC
+// or a pile of H.264 waiting to be transcoded.
+func printResolutionBreakdown(r analyze.Report) {
+	fmt.Println("resolution:")
+	for _, tier := range sortedByBytesDesc(r.ByResolution) {
+		b := r.ByResolution[tier]
+		fmt.Printf("  %-24s %5d files  %8.1f GB\n", tier, b.Files, float64(b.Bytes)/1e9)
+		codecs := r.ByResolutionCodec[tier]
+		for _, codec := range sortedByBytesDesc(codecs) {
+			cb := codecs[codec]
+			fmt.Printf("    %-22s %5d files  %8.1f GB\n", codec, cb.Files, float64(cb.Bytes)/1e9)
+		}
+	}
+	fmt.Println()
+}
+
 func printBuckets(label string, buckets map[string]analyze.Bucket) {
+	fmt.Printf("%s:\n", label)
+	for _, k := range sortedByBytesDesc(buckets) {
+		b := buckets[k]
+		fmt.Printf("  %-24s %5d files  %8.1f GB\n", k, b.Files, float64(b.Bytes)/1e9)
+	}
+	fmt.Println()
+}
+
+// sortedByBytesDesc orders bucket keys largest-first so the biggest chunks
+// of the library show up first regardless of which attribute is grouped.
+func sortedByBytesDesc(buckets map[string]analyze.Bucket) []string {
 	keys := make([]string, 0, len(buckets))
 	for k := range buckets {
 		keys = append(keys, k)
 	}
 	sort.Slice(keys, func(i, j int) bool { return buckets[keys[i]].Bytes > buckets[keys[j]].Bytes })
-
-	fmt.Printf("%s:\n", label)
-	for _, k := range keys {
-		b := buckets[k]
-		fmt.Printf("  %-24s %5d files  %8.1f GB\n", k, b.Files, float64(b.Bytes)/1e9)
-	}
-	fmt.Println()
+	return keys
 }
 
 func enqueueCommand(args []string) error {

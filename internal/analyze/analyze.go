@@ -29,21 +29,21 @@ type Bucket struct {
 // Report is a set of breakdowns over the same library sweep, each keyed by
 // a different attribute of the probed files.
 type Report struct {
-	Files          int
-	Bytes          int64
-	ByCodec        map[string]Bucket
-	ByResolution   map[string]Bucket
-	ByDynamicRange map[string]Bucket
-	ByDecision     map[string]Bucket // policy.Decide's profile, or "skip: <reason>"
-	Errors         []error           // files that couldn't be probed
+	Files             int
+	Bytes             int64
+	ByResolution      map[string]Bucket
+	ByResolutionCodec map[string]map[string]Bucket // resolution tier -> codec -> bucket
+	ByDynamicRange    map[string]Bucket
+	ByDecision        map[string]Bucket // policy.Decide's profile, or "skip: <reason>"
+	Errors            []error           // files that couldn't be probed
 }
 
 func newReport() Report {
 	return Report{
-		ByCodec:        make(map[string]Bucket),
-		ByResolution:   make(map[string]Bucket),
-		ByDynamicRange: make(map[string]Bucket),
-		ByDecision:     make(map[string]Bucket),
+		ByResolution:      make(map[string]Bucket),
+		ByResolutionCodec: make(map[string]map[string]Bucket),
+		ByDynamicRange:    make(map[string]Bucket),
+		ByDecision:        make(map[string]Bucket),
 	}
 }
 
@@ -101,8 +101,9 @@ type probeOutcome struct {
 func (r *Report) add(m probe.MediaInfo) {
 	r.Files++
 	r.Bytes += m.SizeBytes
-	bump(r.ByCodec, m.VideoCodec, m.SizeBytes)
-	bump(r.ByResolution, resolutionTier(m.Height), m.SizeBytes)
+	resolution := resolutionTier(m.Height)
+	bump(r.ByResolution, resolution, m.SizeBytes)
+	bumpNested(r.ByResolutionCodec, resolution, m.VideoCodec, m.SizeBytes)
 	bump(r.ByDynamicRange, dynamicRange(m), m.SizeBytes)
 	bump(r.ByDecision, decisionLabel(m), m.SizeBytes)
 }
@@ -112,6 +113,13 @@ func bump(buckets map[string]Bucket, key string, size int64) {
 	b.Files++
 	b.Bytes += size
 	buckets[key] = b
+}
+
+func bumpNested(buckets map[string]map[string]Bucket, outerKey, innerKey string, size int64) {
+	if buckets[outerKey] == nil {
+		buckets[outerKey] = make(map[string]Bucket)
+	}
+	bump(buckets[outerKey], innerKey, size)
 }
 
 // resolutionTier mirrors the height cutoff policy.MediaInfo.IsUHD uses, plus
