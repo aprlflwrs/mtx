@@ -33,7 +33,7 @@ to = "/mnt/media/movies"
 # (lower = higher quality and bigger files).
 [quality]
 hd_global_quality = 22    # hevc_qsv ICQ, 1080p-and-below tier
-uhd_hdr_crf = 18          # x265, 4K HDR
+uhd_hdr_crf = 15          # x265, 4K HDR — lower than SDR: HDR's flat PQ samples make x265 under-allocate bits at the same CRF
 uhd_sdr_crf = 19          # x265, 4K SDR
 av1_crf = 30              # SVT-AV1, opt-in film-grain path
 av1_film_grain_level = 8  # grain synthesis strength (0-50)

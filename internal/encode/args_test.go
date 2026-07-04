@@ -82,7 +82,10 @@ func TestHLGDoesNotGetHDR10Signaling(t *testing.T) {
 
 func TestFilmGrainSynthesisDisablesDenoising(t *testing.T) {
 	cmd := buildArgs(t, probe.MediaInfo{Path: "film.mkv"}, policy.AV1FilmGrain)
-	if !strings.Contains(cmd, "film-grain=8:film-grain-denoise=0") {
+	if !strings.Contains(cmd, "film-grain=8:film-grain-denoise=0:tune=0") {
 		t.Errorf("grain synthesis args wrong: %s", cmd)
+	}
+	if !strings.Contains(cmd, "-preset 4") {
+		t.Errorf("expected preset 4 (not 6, not the highly-slower 2): %s", cmd)
 	}
 }
