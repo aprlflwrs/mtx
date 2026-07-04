@@ -2,6 +2,7 @@ package encode
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -37,8 +38,8 @@ func (r Result) PercentSmaller() float64 {
 // original into quarantine and the new file into its place.
 //
 // The original is never deleted; a failed or unprofitable encode leaves it
-// exactly where it was.
-func ProcessFile(path string, grainRequested bool, cfg config.Config) (Result, error) {
+// exactly where it was. Canceling ctx kills a running ffmpeg.
+func ProcessFile(ctx context.Context, path string, grainRequested bool, cfg config.Config) (Result, error) {
 	media, err := probe.Probe(path)
 	if err != nil {
 		return Result{Path: path}, err
@@ -56,7 +57,7 @@ func ProcessFile(path string, grainRequested bool, cfg config.Config) (Result, e
 	if err != nil {
 		return Result{Path: path}, err
 	}
-	if err := runFFmpeg(args); err != nil {
+	if err := runFFmpeg(ctx, args); err != nil {
 		return Result{Path: path}, err
 	}
 
@@ -88,10 +89,10 @@ func ProcessFile(path string, grainRequested bool, cfg config.Config) (Result, e
 	}, nil
 }
 
-func runFFmpeg(args []string) error {
+func runFFmpeg(ctx context.Context, args []string) error {
 	quietArgs := append([]string{"-v", "warning"}, args...)
 	var stderr bytes.Buffer
-	cmd := exec.Command("ffmpeg", quietArgs...)
+	cmd := exec.CommandContext(ctx, "ffmpeg", quietArgs...)
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("ffmpeg: %w\n%s", err, lastLines(stderr.String(), 10))
