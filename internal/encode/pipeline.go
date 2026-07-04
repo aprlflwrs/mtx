@@ -1,6 +1,7 @@
 package encode
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +17,14 @@ import (
 	"mtx/internal/policy"
 	"mtx/internal/probe"
 )
+
+// Progress reports how far a single file's encode has gotten, for callers
+// that want to render a progress bar. Speed is ffmpeg's own "Nx" realtime
+// multiplier (e.g. "17.3x"), printed as ffmpeg reports it.
+type Progress struct {
+	FractionDone float64
+	Speed        string
+}
 
 type Result struct {
 	Path        string
@@ -38,8 +48,10 @@ func (r Result) PercentSmaller() float64 {
 // original into quarantine and the new file into its place.
 //
 // The original is never deleted; a failed or unprofitable encode leaves it
-// exactly where it was. Canceling ctx kills a running ffmpeg.
-func ProcessFile(ctx context.Context, path string, grainRequested bool, cfg config.Config) (Result, error) {
+// exactly where it was. Canceling ctx kills a running ffmpeg. onProgress, if
+// non-nil, is called periodically while the encode runs; it may be called
+// from a different goroutine than the caller.
+func ProcessFile(ctx context.Context, path string, grainRequested bool, cfg config.Config, onProgress func(Progress)) (Result, error) {
 	media, err := probe.Probe(path)
 	if err != nil {
 		return Result{Path: path}, err
@@ -57,7 +69,7 @@ func ProcessFile(ctx context.Context, path string, grainRequested bool, cfg conf
 	if err != nil {
 		return Result{Path: path}, err
 	}
-	if err := runFFmpeg(ctx, args); err != nil {
+	if err := runFFmpeg(ctx, args, media.Duration, onProgress); err != nil {
 		return Result{Path: path}, err
 	}
 
@@ -89,15 +101,60 @@ func ProcessFile(ctx context.Context, path string, grainRequested bool, cfg conf
 	}, nil
 }
 
-func runFFmpeg(ctx context.Context, args []string) error {
-	quietArgs := append([]string{"-v", "warning"}, args...)
+func runFFmpeg(ctx context.Context, args []string, duration time.Duration, onProgress func(Progress)) error {
+	// -progress pipe:1 makes ffmpeg emit periodic key=value lines (out_time_us,
+	// speed, progress=continue|end) instead of its usual human-readable
+	// stats, so we can parse real progress without scraping the stderr banner.
+	progressArgs := append([]string{"-v", "warning", "-progress", "pipe:1"}, args...)
+	cmd := exec.CommandContext(ctx, "ffmpeg", progressArgs...)
+
 	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, "ffmpeg", quietArgs...)
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	watchProgress(stdout, duration, onProgress)
+
+	if err := cmd.Wait(); err != nil {
 		return fmt.Errorf("ffmpeg: %w\n%s", err, lastLines(stderr.String(), 10))
 	}
 	return nil
+}
+
+// watchProgress reads ffmpeg's -progress output until it closes and reports
+// each update through onProgress (a no-op when onProgress is nil).
+func watchProgress(stdout io.Reader, duration time.Duration, onProgress func(Progress)) {
+	scanner := bufio.NewScanner(stdout)
+	var outTime time.Duration
+	for scanner.Scan() {
+		key, value, found := strings.Cut(scanner.Text(), "=")
+		if !found {
+			continue
+		}
+		switch key {
+		case "out_time_us":
+			if microseconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+				outTime = time.Duration(microseconds) * time.Microsecond
+			}
+		case "speed":
+			if onProgress != nil {
+				onProgress(Progress{FractionDone: fractionDone(outTime, duration), Speed: strings.TrimSpace(value)})
+			}
+		}
+	}
+}
+
+func fractionDone(elapsed, total time.Duration) float64 {
+	if total <= 0 {
+		return 0
+	}
+	fraction := elapsed.Seconds() / total.Seconds()
+	return min(fraction, 1)
 }
 
 // verify probes the freshly encoded file and confirms it is a plausible

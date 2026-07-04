@@ -51,7 +51,7 @@ func (d *Daemon) drainQueue(ctx context.Context) {
 		}
 
 		d.Log.Info("job started", "path", job.Path)
-		result, err := encode.ProcessFile(ctx, job.Path, job.Grain, d.Config)
+		result, err := encode.ProcessFile(ctx, job.Path, job.Grain, d.Config, nil)
 		if ctx.Err() != nil {
 			// Interrupted by shutdown, not a real failure: leave the job
 			// "running" so the restart reset re-queues it.

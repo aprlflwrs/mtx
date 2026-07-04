@@ -40,3 +40,14 @@ func Walk(roots []string, visit func(path string) error) error {
 	}
 	return errors.Join(problems...)
 }
+
+// Collect gathers every video file under each root into one slice, for
+// callers that need the total count up front (e.g. to show "3 of 20").
+func Collect(roots []string) ([]string, error) {
+	var files []string
+	err := Walk(roots, func(path string) error {
+		files = append(files, path)
+		return nil
+	})
+	return files, err
+}

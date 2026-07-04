@@ -226,15 +226,32 @@ func enqueueCommand(args []string) error {
 }
 
 func processNow(paths []string, grain bool, cfg config.Config) error {
+	files, err := scan.Collect(paths)
+	if err != nil {
+		return err
+	}
+
 	ctx := interruptibleContext()
-	return eachVideoFile(paths, func(file string) error {
+	var totalBefore, totalAfter int64
+	for i, file := range files {
 		if ctx.Err() != nil {
-			return nil // interrupted: skip the remaining files quietly
+			break // interrupted: leave the remaining files untouched
 		}
-		result, err := encode.ProcessFile(ctx, file, grain, cfg)
+		result, err := encode.ProcessFile(ctx, file, grain, cfg, func(p encode.Progress) {
+			renderProgress(i+1, len(files), filepath.Base(file), p)
+		})
+		clearProgressLine()
 		report(result, err)
-		return nil
-	})
+		totalBefore += result.SizeBefore
+		totalAfter += result.SizeAfter
+	}
+
+	if totalBefore > 0 {
+		fmt.Printf("\ntotal: %.1f GB -> %.1f GB (%.0f%% smaller) across %d file(s)\n",
+			float64(totalBefore)/1e9, float64(totalAfter)/1e9,
+			100*(1-float64(totalAfter)/float64(totalBefore)), len(files))
+	}
+	return nil
 }
 
 func addToQueue(paths []string, grain bool, cfg config.Config) error {
