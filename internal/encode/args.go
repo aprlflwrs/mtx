@@ -12,53 +12,73 @@ import (
 	"mtx/internal/probe"
 )
 
+// videoPipeline is the ffmpeg argument list for one profile, split by where
+// each part must sit relative to -i: hardware device setup has to precede
+// the input, everything else follows it.
+type videoPipeline struct {
+	preInput []string // global options that must appear before -i (e.g. hardware device init)
+	filter   []string // -vf entries applied to the video stream before encoding
+	encoder  []string // -c:v and its encoder-specific flags
+}
+
 // Args returns the full ffmpeg argument list (excluding the "ffmpeg" binary
 // itself) to transcode src into dst under the given profile.
 //
 // Every profile keeps all streams (-map 0) and copies audio, subtitles, and
 // chapters untouched — only the video stream is re-encoded.
 func Args(m probe.MediaInfo, profile policy.Profile, q config.Quality, dst string) ([]string, error) {
-	keepEverythingButVideo := []string{
-		"-y", "-i", m.Path,
-		"-map", "0",
-		"-c:a", "copy",
-		"-c:s", "copy",
-	}
-
-	video, err := videoArgs(m, profile, q)
+	pipeline, err := videoArgs(m, profile, q)
 	if err != nil {
 		return nil, err
 	}
-	return append(append(keepEverythingButVideo, video...), dst), nil
+
+	args := append([]string{}, pipeline.preInput...)
+	args = append(args, "-y", "-i", m.Path, "-map", "0", "-c:a", "copy", "-c:s", "copy")
+	args = append(args, pipeline.filter...)
+	args = append(args, pipeline.encoder...)
+	return append(args, dst), nil
 }
 
-func videoArgs(m probe.MediaInfo, profile policy.Profile, q config.Quality) ([]string, error) {
+func videoArgs(m probe.MediaInfo, profile policy.Profile, q config.Quality) (videoPipeline, error) {
 	switch profile {
 	case policy.HDQuickSync:
-		// -look_ahead 1 upgrades ICQ to lookahead-ICQ: better quality for
-		// nearly the same speed.
-		return []string{
-			"-c:v", "hevc_qsv",
-			"-preset", "slow",
-			"-global_quality", strconv.Itoa(q.HDGlobalQuality),
-			"-look_ahead", "1",
+		// hevc_vaapi, not hevc_qsv: on this hardware (Alder Lake iGPU,
+		// media-driver 25.2.3 + libmfx-gen1.2 25.1.4), the QSV path's
+		// MFX/oneVPL translation layer rejects every encoder parameter
+		// combination outright — a driver/runtime compatibility break, not
+		// a settings problem (confirmed via direct ffmpeg testing). vaapi
+		// talks to the same Quick Sync silicon directly through VA-API,
+		// bypassing that broken layer entirely; it's also what Jellyfin
+		// itself uses for hardware transcoding, for the same reason.
+		//
+		// This driver rejects explicit ICQ (confirmed: "Driver does not
+		// support ICQ RC mode"); leaving rc_mode on auto with only
+		// -global_quality set makes it choose QVBR instead, which is
+		// quality-targeted the same way ICQ is, just with an added soft
+		// bitrate ceiling — not a quality downgrade in practice. There's no
+		// vaapi equivalent of qsv's -look_ahead, so that small lookahead
+		// boost is given up along with the broken qsv path.
+		return videoPipeline{
+			preInput: []string{"-init_hw_device", "vaapi=hw"},
+			filter:   []string{"-vf", "format=nv12,hwupload"},
+			encoder:  []string{"-c:v", "hevc_vaapi", "-global_quality", strconv.Itoa(q.HDGlobalQuality)},
 		}, nil
 
 	case policy.UHDSDRx265:
-		return []string{
+		return videoPipeline{encoder: []string{
 			"-c:v", "libx265",
 			"-preset", "slow",
 			"-crf", strconv.Itoa(q.UHDSDRCRF),
 			"-pix_fmt", "yuv420p10le",
-		}, nil
+		}}, nil
 
 	case policy.UHDHDRx265:
-		return append([]string{
+		return videoPipeline{encoder: append([]string{
 			"-c:v", "libx265",
 			"-preset", "slow",
 			"-crf", strconv.Itoa(q.UHDHDRCRF),
 			"-pix_fmt", "yuv420p10le",
-		}, hdrPreservationArgs(m)...), nil
+		}, hdrPreservationArgs(m)...)}, nil
 
 	case policy.AV1FilmGrain:
 		// film-grain-denoise defaults to on, which discards fine detail its
@@ -68,14 +88,14 @@ func videoArgs(m probe.MediaInfo, profile policy.Profile, q config.Quality) ([]s
 		// and this profile is already opt-in/per-file rather than bulk.
 		// tune=0 (VQ) is mainline SVT-AV1's perceptual mode, matching intent
 		// to preserve how grain looks rather than optimize PSNR.
-		return []string{
+		return videoPipeline{encoder: []string{
 			"-c:v", "libsvtav1",
 			"-preset", "4",
 			"-crf", strconv.Itoa(q.AV1CRF),
 			"-svtav1-params", fmt.Sprintf("film-grain=%d:film-grain-denoise=0:tune=0", q.AV1FilmGrainLevel),
-		}, nil
+		}}, nil
 	}
-	return nil, fmt.Errorf("no ffmpeg arguments defined for profile %q", profile)
+	return videoPipeline{}, fmt.Errorf("no ffmpeg arguments defined for profile %q", profile)
 }
 
 // hdrPreservationArgs re-attaches the source's HDR signaling explicitly,

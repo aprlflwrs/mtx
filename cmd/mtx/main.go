@@ -19,6 +19,7 @@ import (
 	"mtx/internal/encode"
 	"mtx/internal/policy"
 	"mtx/internal/probe"
+	"mtx/internal/quality"
 	"mtx/internal/queue"
 	"mtx/internal/scan"
 	"mtx/internal/server"
@@ -32,6 +33,7 @@ Usage:
   mtx enqueue --now [flags] <path...>  transcode them right here, synchronously
   mtx serve [--config <file>]          run the daemon: workers + periodic library scan
   mtx status [--config <file>]         queue and savings summary
+  mtx score <source> <encoded>         measure quality drift between two files (VMAF)
 
 Flags for enqueue:
   --now                bypass the queue and process synchronously
@@ -55,6 +57,8 @@ func main() {
 		err = serveCommand(os.Args[2:])
 	case "status":
 		err = statusCommand(os.Args[2:])
+	case "score":
+		err = scoreCommand(os.Args[2:])
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
@@ -227,6 +231,43 @@ func statusCommand(args []string) error {
 		fmt.Printf("%-8s %d\n", status, summary.CountByStatus[status])
 	}
 	fmt.Printf("saved    %.1f GB\n", float64(summary.BytesSaved)/1e9)
+	return nil
+}
+
+// Commonly cited VMAF thresholds for "can't tell the difference" on typical
+// TV viewing. The worst-frame minimum matters as much as the mean — a good
+// average can hide one badly-mangled scene. Not a hard cutoff either way:
+// treat a fail here as "go look at this clip," not an automatic verdict.
+const (
+	transparentMeanVMAF = 95.0
+	transparentMinVMAF  = 90.0
+)
+
+func scoreCommand(args []string) error {
+	flags := flag.NewFlagSet("score", flag.ExitOnError)
+	minMean := flags.Float64("min-mean", transparentMeanVMAF, "VMAF mean threshold to pass/fail against")
+	minFrame := flags.Float64("min-frame", transparentMinVMAF, "VMAF worst-frame threshold to pass/fail against")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 2 {
+		return fmt.Errorf("usage: mtx score <source> <encoded>")
+	}
+
+	score, err := quality.Compare(interruptibleContext(), flags.Arg(0), flags.Arg(1))
+	if err != nil {
+		return err
+	}
+
+	verdict := "PASS"
+	if score.Mean < *minMean || score.Min < *minFrame {
+		verdict = "FAIL"
+	}
+	fmt.Printf("VMAF mean: %.2f (threshold %.2f), worst frame: %.2f (threshold %.2f) — %s\n",
+		score.Mean, *minMean, score.Min, *minFrame, verdict)
+	if verdict == "FAIL" {
+		os.Exit(1)
+	}
 	return nil
 }
 
