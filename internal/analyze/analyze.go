@@ -5,10 +5,20 @@
 package analyze
 
 import (
+	"runtime"
+	"sync"
+
 	"mtx/internal/policy"
 	"mtx/internal/probe"
 	"mtx/internal/scan"
 )
+
+// probeConcurrency bounds how many ffprobe processes run at once. Probing
+// only reads container headers, not the whole file, so it's cheap enough to
+// run well beyond the CPU count without saturating anything.
+func probeConcurrency() int {
+	return min(runtime.NumCPU()*4, 32)
+}
 
 // Bucket tallies the files and bytes that share some attribute.
 type Bucket struct {
@@ -41,18 +51,51 @@ func newReport() Report {
 // report. A file that fails to probe is recorded in Report.Errors rather
 // than aborting the sweep; the returned error carries only filesystem
 // problems (unreadable directories and the like) from scan.Walk.
+//
+// Discovery stays single-threaded (scan.Walk), but probing fans out across
+// a worker pool: each ffprobe invocation pays for a process spawn, and a
+// library sweep is otherwise bottlenecked on that one file at a time.
 func Walk(roots []string) (Report, error) {
-	report := newReport()
-	err := scan.Walk(roots, func(path string) error {
-		media, probeErr := probe.Probe(path)
-		if probeErr != nil {
-			report.Errors = append(report.Errors, probeErr)
+	paths := make(chan string)
+	results := make(chan probeOutcome)
+
+	var workers sync.WaitGroup
+	for range probeConcurrency() {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for path := range paths {
+				media, err := probe.Probe(path)
+				results <- probeOutcome{media, err}
+			}
+		}()
+	}
+
+	var walkErr error
+	go func() {
+		walkErr = scan.Walk(roots, func(path string) error {
+			paths <- path
 			return nil
+		})
+		close(paths)
+		workers.Wait()
+		close(results)
+	}()
+
+	report := newReport()
+	for outcome := range results {
+		if outcome.err != nil {
+			report.Errors = append(report.Errors, outcome.err)
+			continue
 		}
-		report.add(media)
-		return nil
-	})
-	return report, err
+		report.add(outcome.media)
+	}
+	return report, walkErr
+}
+
+type probeOutcome struct {
+	media probe.MediaInfo
+	err   error
 }
 
 func (r *Report) add(m probe.MediaInfo) {
