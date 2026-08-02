@@ -143,7 +143,33 @@ mtx enqueue --now <path...>          transcode right here, synchronously
 mtx serve [--config <file>]          the daemon: workers + scanner + HTTP
 mtx status                           queue counts and total bytes saved
 mtx score <source> <encoded>         measure quality drift with VMAF
+mtx bench --values <csv> <file...>   sweep quality settings on real files: size, VMAF, and encode time
 ```
+
+## Tuning quality settings (`mtx bench`)
+
+`mtx bench` sweeps a list of values for whichever `[quality]` knob applies to
+a file's profile (`hd_global_quality` for HD, `uhd_sdr_crf`/`uhd_hdr_crf` for
+4K, `av1_crf` for the grain path), encoding each to a throwaway temp file —
+the original is never touched — and reporting size, encode time, and VMAF
+drift per value:
+
+```sh
+mtx bench --values "18,22,26,30" /mnt/media/movies/Some.Movie.mkv
+```
+
+Use `--clip 3m` to sweep on a few minutes instead of the whole file — much
+faster for iterating. Pick the clip from a *representative* section, not the
+first few minutes: opening logos and title cards are unusually low-bitrate
+and skew both the size comparison and VMAF scores. Pre-cut a representative
+sample once (`ffmpeg -ss 10:00 -t 3:00 -i Some.Movie.mkv -c copy sample.mkv`)
+and bench that file directly if the source's first few minutes aren't
+representative.
+
+`--csv <path>` appends every run's results as rows for combining across
+files/sessions. `--skip-vmaf` skips scoring for a faster size/time-only pass.
+`--keep-outputs <dir>` saves the encoded files instead of discarding them, so
+you can eyeball a specific value directly.
 
 ## Not built yet, by design
 
