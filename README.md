@@ -48,14 +48,15 @@ uses `hevc_vaapi`, not `hevc_qsv` — see the note below on why.
 The service user needs `render` group membership (for `/dev/dri/renderD128`)
 and read/write access to the library with the same group your media stack uses.
 
-**Why `hevc_vaapi` and not `hevc_qsv`:** on Debian 13 with this box's Alder
-Lake iGPU, `hevc_qsv`'s MFX/oneVPL translation layer rejected every parameter
-combination outright (confirmed by hand against real ffmpeg — a driver/runtime
-compatibility break, not a settings problem). `hevc_vaapi` reaches the
-identical Quick Sync hardware encoder block directly via VA-API, bypassing
-that broken layer — it's also what Jellyfin itself uses for hardware
-transcoding, for the same reason. If a future driver/runtime update fixes the
-qsv path, this is a one-profile change in `internal/encode/args.go`.
+**Why `hevc_vaapi` and not `hevc_qsv`:** both work on current driver versions
+(an earlier belief that `hevc_qsv`'s MFX/oneVPL layer was broken outright was
+correct at the time but is now stale — fixed by a driver/runtime update).
+`hevc_vaapi` stays the default because direct ffmpeg+VMAF testing on real
+content showed it measurably better at matching `-global_quality` numbers;
+quality-target numbers aren't portable across encoder wrappers, so QSV would
+need its own calibrated value and a real head-to-head before it's a
+contender. If that changes, this is a one-profile change in
+`internal/encode/args.go`.
 
 Build and deploy:
 

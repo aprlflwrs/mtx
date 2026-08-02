@@ -31,19 +31,19 @@ func TestEveryProfileKeepsAudioAndSubtitlesUntouched(t *testing.T) {
 }
 
 func TestQuickSyncUsesVAAPIWithHardwareDeviceInit(t *testing.T) {
-	// hevc_qsv's MFX/oneVPL layer is broken on this box's driver/runtime
-	// combination (confirmed by hand against real ffmpeg); hevc_vaapi reaches
-	// the same Quick Sync silicon directly and is what actually works.
+	// hevc_vaapi is used over hevc_qsv not because qsv is broken (it isn't,
+	// on current drivers) but because it measured better VMAF at matching
+	// quality numbers in direct testing; see the profile's own comment.
 	args, err := Args(probe.MediaInfo{Path: "ep.mkv"}, policy.HDQuickSync, config.Defaults().Quality, "out.mkv")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cmd := strings.Join(args, " ")
 
-	if strings.Contains(cmd, "hevc_qsv") || strings.Contains(cmd, "look_ahead") {
-		t.Errorf("should not reference the broken qsv path: %s", cmd)
+	if strings.Contains(cmd, "hevc_qsv") {
+		t.Errorf("should not reference the qsv path: %s", cmd)
 	}
-	for _, want := range []string{"-c:v hevc_vaapi", "-global_quality 18", "-vf format=nv12,hwupload"} {
+	for _, want := range []string{"-c:v hevc_vaapi", "-global_quality 18", "-vf format=nv12,hwupload", "-bf 4", "-b_depth 2"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("missing %q in: %s", want, cmd)
 		}
