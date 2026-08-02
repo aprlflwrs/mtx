@@ -43,16 +43,17 @@ func TestQuickSyncUsesVAAPIWithHardwareDeviceInit(t *testing.T) {
 	if strings.Contains(cmd, "hevc_qsv") {
 		t.Errorf("should not reference the qsv path: %s", cmd)
 	}
-	for _, want := range []string{"-c:v hevc_vaapi", "-global_quality 18", "-vf format=nv12,hwupload", "-bf 4", "-b_depth 2"} {
+	for _, want := range []string{"-c:v hevc_vaapi", "-global_quality 18", "-hwaccel vaapi", "-hwaccel_output_format vaapi", "-bf 4", "-b_depth 2"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("missing %q in: %s", want, cmd)
 		}
 	}
 
-	deviceInitIndex := indexOf(args, "-init_hw_device")
 	inputIndex := indexOf(args, "-i")
-	if deviceInitIndex == -1 || inputIndex == -1 || deviceInitIndex > inputIndex {
-		t.Errorf("-init_hw_device must precede -i, got: %s", cmd)
+	for _, preInputFlag := range []string{"-init_hw_device", "-hwaccel"} {
+		if idx := indexOf(args, preInputFlag); idx == -1 || inputIndex == -1 || idx > inputIndex {
+			t.Errorf("%s must precede -i, got: %s", preInputFlag, cmd)
+		}
 	}
 }
 
