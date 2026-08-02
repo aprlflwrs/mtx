@@ -37,6 +37,7 @@ Usage:
   mtx serve [--config <file>]          run the daemon: workers + periodic library scan
   mtx status [--config <file>]         queue and savings summary
   mtx score <source> <encoded>         measure quality drift between two files (VMAF)
+  mtx bench --values <csv> <file...>   sweep quality settings on real files: size, VMAF, and encode time
 
 Flags for enqueue:
   --now                bypass the queue and process synchronously
@@ -47,6 +48,16 @@ Flags for enqueue:
 Flags for analyze:
   --config <file>      config file (default /etc/mtx/config.toml if it exists)
                         paths default to the config's library_roots when omitted
+
+Flags for bench:
+  --values <csv>        quality values to sweep for the file's profile knob (required),
+                         e.g. "18,20,22,24" for hd-qsv, or CRF values for the x265/AV1 profiles
+  --clip <duration>      encode/score only this much of each file, e.g. 3m (default: whole file)
+  --grain                opt into AV1 film-grain synthesis (SDR only)
+  --skip-vmaf             skip VMAF scoring (faster iteration on size/time alone)
+  --keep-outputs <dir>    save encoded outputs here instead of discarding them
+  --csv <path>            append results as CSV rows to this file
+  --config <file>         base config; only the swept knob is overridden per run
 `
 
 func main() {
@@ -68,6 +79,8 @@ func main() {
 		err = statusCommand(os.Args[2:])
 	case "score":
 		err = scoreCommand(os.Args[2:])
+	case "bench":
+		err = benchCommand(os.Args[2:])
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)

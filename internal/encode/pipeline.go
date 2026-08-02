@@ -69,7 +69,7 @@ func ProcessFile(ctx context.Context, path string, grainRequested bool, cfg conf
 	if err != nil {
 		return Result{Path: path}, err
 	}
-	if err := runFFmpeg(ctx, args, media.Duration, onProgress); err != nil {
+	if err := RunFFmpeg(ctx, args, media.Duration, onProgress); err != nil {
 		return Result{Path: path}, err
 	}
 
@@ -101,7 +101,10 @@ func ProcessFile(ctx context.Context, path string, grainRequested bool, cfg conf
 	}, nil
 }
 
-func runFFmpeg(ctx context.Context, args []string, duration time.Duration, onProgress func(Progress)) error {
+// RunFFmpeg runs ffmpeg with the given arguments, reporting progress against
+// duration (the expected output length — the full source, or a clip's
+// length when the caller trimmed the args with -t).
+func RunFFmpeg(ctx context.Context, args []string, duration time.Duration, onProgress func(Progress)) error {
 	// -progress pipe:1 makes ffmpeg emit periodic key=value lines (out_time_us,
 	// speed, progress=continue|end) instead of its usual human-readable
 	// stats, so we can parse real progress without scraping the stderr banner.

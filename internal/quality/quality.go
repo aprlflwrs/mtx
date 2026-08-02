@@ -98,6 +98,12 @@ func decodeToY4M(ctx context.Context, input, outputPipe string) *exec.Cmd {
 		"-v", "error", "-y",
 		"-i", input,
 		"-pix_fmt", "yuv420p",
+		// Real (non-synthetic) sources often carry chroma_location metadata
+		// that makes ffmpeg tag the y4m header C420paldv instead of the
+		// standard C420mpeg2/C420jpeg. This libvmaf build's y4m reader
+		// segfaults on that tag — confirmed by hand against real 1080p
+		// content. Forcing standard left-sited chroma sidesteps it entirely.
+		"-vf", "setparams=chroma_location=left",
 		"-f", "yuv4mpegpipe", outputPipe,
 	)
 }
