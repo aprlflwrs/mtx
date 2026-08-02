@@ -9,9 +9,12 @@ Design research and rationale live in `~/docs/optimize/`.
 ## What it does
 
 - **1080p-and-below** (the bulk of a TV library): hardware HEVC on Intel Quick
-  Sync silicon via VAAPI — fast, cheap, typically 60–85% smaller on old
-  high-bitrate rips (modest, ~10–15%, on already-efficient modern WEB-DL
-  sources — there's just less bloat to remove).
+  Sync silicon via VAAPI. At a VMAF-validated quality setting, measured
+  savings vary more by source than by age: ~15-35% on old high-bitrate BluRay
+  rips (grain and fine detail cost bits to preserve transparently), ~30-45%
+  on modern WEB-DL sources, more on very flat/animated content. See "Tuning
+  quality settings" below — don't trust round numbers here, bench your own
+  library.
 - **4K SDR**: software x265 at a conservative CRF.
 - **4K HDR10/HLG**: software x265 with the source's HDR metadata explicitly
   re-attached (ffmpeg drops it otherwise, producing washed-out output).
@@ -170,6 +173,37 @@ representative.
 files/sessions. `--skip-vmaf` skips scoring for a faster size/time-only pass.
 `--keep-outputs <dir>` saves the encoded files instead of discarding them, so
 you can eyeball a specific value directly.
+
+### How `hd_global_quality` was set
+
+`mtx analyze` against this library showed every 4K/UHD file already HEVC —
+the uhd-sdr-x265/uhd-hdr-x265 profiles currently have zero real candidates
+here, so all tuning effort went into `hd_global_quality`, which covers 100%
+of the actual transcode workload (2432 files, 5.4 TB). Swept `16..30` against
+four 3-minute samples picked for range, not convenience — old high-bitrate
+BluRay rip, grainy 1966 film, animated WEB-DL, modern live-action WEB-DL —
+each clipped from a representative mid-file scene:
+
+| source | q=18 size | q=18 VMAF mean/min | mean stays >=95 up to |
+|---|---|---|---|
+| old high-bitrate BluRay (drama) | -35% | 96.5 / 90.7 | q=20 |
+| grainy 1966 film | -17% | 96.1 / 88.8 | q=18 |
+| animated WEB-DL | -28% | 97.4 / 91.3 | q=26 |
+| modern live-action WEB-DL | -45% | 97.0 / 89.3 | q=22 |
+
+18 is the floor: the most-compressed value that still holds VMAF mean >=95
+on every sample (the grainy film is the binding constraint). The previous
+default of 22 measured mean as low as 92-93 on the harder samples —
+noticeably below transparent, never validated: `mtx score`'s VMAF path
+segfaulted on all real content until it was fixed alongside `mtx bench`, so
+this default had never actually been checked against real footage before.
+
+Worst-frame VMAF is a much stricter, single-scene-dominated metric — the
+modern WEB-DL sample never cleared 90 even at q=14 (essentially
+lossless-sized output), because of one hard frame in that clip. Treat
+worst-frame the way the codebase already documents it: a "go look at this
+scene" flag, not a pass/fail gate — using it as an absolute floor would
+force near-zero compression library-wide over isolated frames.
 
 ## Not built yet, by design
 

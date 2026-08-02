@@ -43,7 +43,7 @@ func TestQuickSyncUsesVAAPIWithHardwareDeviceInit(t *testing.T) {
 	if strings.Contains(cmd, "hevc_qsv") || strings.Contains(cmd, "look_ahead") {
 		t.Errorf("should not reference the broken qsv path: %s", cmd)
 	}
-	for _, want := range []string{"-c:v hevc_vaapi", "-global_quality 22", "-vf format=nv12,hwupload"} {
+	for _, want := range []string{"-c:v hevc_vaapi", "-global_quality 18", "-vf format=nv12,hwupload"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("missing %q in: %s", want, cmd)
 		}
