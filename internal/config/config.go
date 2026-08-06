@@ -47,7 +47,14 @@ func Defaults() Config {
 		Workers:        1,
 		Listen:         "127.0.0.1:8787",
 		Quality: Quality{
-			HDGlobalQuality:   22,
+			// hd_global_quality=18: validated via `mtx bench` against 4
+			// representative samples (old high-bitrate BluRay, grainy 1966
+			// film, animated WEB-DL, modern live-action WEB-DL) — the
+			// lowest-quality (most-compressed) value that keeps VMAF mean
+			// >=95 on every sample. 22 measured mean as low as 92-93 on the
+			// harder samples — visibly below transparent. See README
+			// "Tuning quality settings".
+			HDGlobalQuality:   18,
 			UHDHDRCRF:         15,
 			UHDSDRCRF:         19,
 			AV1CRF:            30,

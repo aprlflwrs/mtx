@@ -31,28 +31,29 @@ func TestEveryProfileKeepsAudioAndSubtitlesUntouched(t *testing.T) {
 }
 
 func TestQuickSyncUsesVAAPIWithHardwareDeviceInit(t *testing.T) {
-	// hevc_qsv's MFX/oneVPL layer is broken on this box's driver/runtime
-	// combination (confirmed by hand against real ffmpeg); hevc_vaapi reaches
-	// the same Quick Sync silicon directly and is what actually works.
+	// hevc_vaapi is used over hevc_qsv not because qsv is broken (it isn't,
+	// on current drivers) but because it measured better VMAF at matching
+	// quality numbers in direct testing; see the profile's own comment.
 	args, err := Args(probe.MediaInfo{Path: "ep.mkv"}, policy.HDQuickSync, config.Defaults().Quality, "out.mkv")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cmd := strings.Join(args, " ")
 
-	if strings.Contains(cmd, "hevc_qsv") || strings.Contains(cmd, "look_ahead") {
-		t.Errorf("should not reference the broken qsv path: %s", cmd)
+	if strings.Contains(cmd, "hevc_qsv") {
+		t.Errorf("should not reference the qsv path: %s", cmd)
 	}
-	for _, want := range []string{"-c:v hevc_vaapi", "-global_quality 22", "-vf format=nv12,hwupload"} {
+	for _, want := range []string{"-c:v hevc_vaapi", "-global_quality 18", "-hwaccel vaapi", "-hwaccel_output_format vaapi", "-bf 4", "-b_depth 2"} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("missing %q in: %s", want, cmd)
 		}
 	}
 
-	deviceInitIndex := indexOf(args, "-init_hw_device")
 	inputIndex := indexOf(args, "-i")
-	if deviceInitIndex == -1 || inputIndex == -1 || deviceInitIndex > inputIndex {
-		t.Errorf("-init_hw_device must precede -i, got: %s", cmd)
+	for _, preInputFlag := range []string{"-init_hw_device", "-hwaccel"} {
+		if idx := indexOf(args, preInputFlag); idx == -1 || inputIndex == -1 || idx > inputIndex {
+			t.Errorf("%s must precede -i, got: %s", preInputFlag, cmd)
+		}
 	}
 }
 

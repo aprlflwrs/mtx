@@ -42,26 +42,44 @@ func Args(m probe.MediaInfo, profile policy.Profile, q config.Quality, dst strin
 func videoArgs(m probe.MediaInfo, profile policy.Profile, q config.Quality) (videoPipeline, error) {
 	switch profile {
 	case policy.HDQuickSync:
-		// hevc_vaapi, not hevc_qsv: on this hardware (Alder Lake iGPU,
-		// media-driver 25.2.3 + libmfx-gen1.2 25.1.4), the QSV path's
-		// MFX/oneVPL translation layer rejects every encoder parameter
-		// combination outright — a driver/runtime compatibility break, not
-		// a settings problem (confirmed via direct ffmpeg testing). vaapi
-		// talks to the same Quick Sync silicon directly through VA-API,
-		// bypassing that broken layer entirely; it's also what Jellyfin
-		// itself uses for hardware transcoding, for the same reason.
+		// hevc_vaapi, not hevc_qsv: hevc_qsv itself works fine on current
+		// driver versions (media-driver 25.2.3 + libmfx-gen1.2 25.1.4) —
+		// an earlier belief that its MFX/oneVPL layer rejected every
+		// parameter combination is stale, fixed by a driver update. But at
+		// matching -global_quality numbers, QSV measured meaningfully worse
+		// VMAF than vaapi on real content (quality-scale numbers aren't
+		// portable across encoder wrappers), and QSV's lookahead-related
+		// flags (-extbrc/-mbbrc/-look_ahead_depth) measured zero effect
+		// under ICQ rate control — so vaapi stays until QSV gets its own
+		// calibrated quality target and a real head-to-head validates it's
+		// actually better, not just numerically smaller at the same digit.
+		//
+		// -bf 4 -b_depth 2 (vaapi defaults to bf=2, the lowest of any HEVC
+		// backend here): validated via direct ffmpeg+VMAF comparison on two
+		// content types (old grainy film, modern WEB-DL) — smaller output
+		// AND better VMAF AND no speed cost on both, no downside found.
 		//
 		// This driver rejects explicit ICQ (confirmed: "Driver does not
 		// support ICQ RC mode"); leaving rc_mode on auto with only
 		// -global_quality set makes it choose QVBR instead, which is
 		// quality-targeted the same way ICQ is, just with an added soft
-		// bitrate ceiling — not a quality downgrade in practice. There's no
-		// vaapi equivalent of qsv's -look_ahead, so that small lookahead
-		// boost is given up along with the broken qsv path.
+		// bitrate ceiling. Explicitly setting -rc_mode ICQ with a large
+		// -bufsize measured zero difference from the auto/QVBR fallback on
+		// real content, so it's not worth the extra flags.
+		//
+		// -hwaccel vaapi -hwaccel_output_format vaapi decodes on the iGPU
+		// too, instead of software-decoding then hwupload-ing the raw
+		// frames — so no filter step is needed at all, decode output is
+		// already in a format the encoder consumes directly. Validated:
+		// identical VMAF and wall-clock time to the old software-decode
+		// path (the encode block is the pipeline's bottleneck either way),
+		// but ~63% less CPU time per encode (measured 23s vs 66s of CPU
+		// time on a 3-minute 1080p clip) — doesn't speed up any single
+		// file, but leaves far more CPU headroom for everything else
+		// running on this host while mtx works through the library.
 		return videoPipeline{
-			preInput: []string{"-init_hw_device", "vaapi=hw"},
-			filter:   []string{"-vf", "format=nv12,hwupload"},
-			encoder:  []string{"-c:v", "hevc_vaapi", "-global_quality", strconv.Itoa(q.HDGlobalQuality)},
+			preInput: []string{"-init_hw_device", "vaapi=hw", "-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"},
+			encoder:  []string{"-c:v", "hevc_vaapi", "-global_quality", strconv.Itoa(q.HDGlobalQuality), "-bf", "4", "-b_depth", "2"},
 		}, nil
 
 	case policy.UHDSDRx265:
